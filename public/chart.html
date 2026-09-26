@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DARK SECRET Real Forex Engine</title>
-  <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
@@ -43,15 +42,12 @@
       background: rgba(20, 20, 20, 0.9); border: 1px solid #333;
       padding: 5px 10px; border-radius: 4px; font-size: 12px; font-weight: bold; color: #fff;
     }
-    .signal-box {
-      position: absolute; top: 12px; right: 15px; z-index: 10;
-      padding: 5px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; color: #fff;
-      display: none;
+    #tv_chart_container {
+      width: 100%; height: 100%;
+      position: absolute; top: 0; left: 0; z-index: 1;
     }
-    .signal-put { background: #e53935; box-shadow: 0 0 10px rgba(229, 57, 53, 0.5); }
-    .signal-call { background: #43a047; box-shadow: 0 0 10px rgba(67, 160, 71, 0.5); }
-    #chartArea { width: 100%; height: 100%; }
   </style>
+  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
 </head>
 <body>
 
@@ -65,103 +61,80 @@
       <div class="status-badge status-closed" id="marketStatus">MARKET CLOSED</div>
     </div>
     
-    <div class="signal-box" id="signalBox"></div>
-    <div id="chartArea"></div>
+    <div id="tv_chart_container"></div>
   </div>
 
 <script>
-  const UTC6_OFFSET = 6 * 3600;
+  // Pair Mapping Dictionary
+  const PAIR_MAP = {
+    'EUR/USD': 'FX:EURUSD', 'EURUSD': 'FX:EURUSD',
+    'USD/JPY': 'FX:USDJPY', 'USDJPY': 'FX:USDJPY',
+    'CAD/JPY': 'FX:CADJPY', 'CADJPY': 'FX:CADJPY',
+    'AUD/CAD': 'FX:AUDCAD', 'AUDCAD': 'FX:AUDCAD',
+    'GBP/USD': 'FX:GBPUSD', 'GBPUSD': 'FX:GBPUSD',
+    'EUR/JPY': 'FX:EURJPY', 'EURJPY': 'FX:EURJPY',
+    'AUD/JPY': 'FX:AUDJPY', 'AUDJPY': 'FX:AUDJPY',
+    'AUD/USD': 'FX:AUDUSD', 'AUDUSD': 'FX:AUDUSD',
+    'EUR/GBP': 'FX:EURGBP', 'EURGBP': 'FX:EURGBP',
+    'AUD/CHF': 'FX:AUDCHF', 'AUDCHF': 'FX:AUDCHF',
+    'EUR/CAD': 'FX:EURCAD', 'EURCAD': 'FX:EURCAD',
+    'GBP/CAD': 'FX:GBPCAD', 'GBPCAD': 'FX:GBPCAD'
+  };
 
   function getSelectedPair() {
     const urlParams = new URLSearchParams(window.location.search);
-    return (urlParams.get('pair') || 'USD/JPY').toUpperCase();
+    const raw = (urlParams.get('pair') || 'USD/JPY').toUpperCase().trim();
+    return raw;
   }
 
   const currentPair = getSelectedPair();
-  document.getElementById('pairDisplay').innerText = `6 ${currentPair.replace('/', '')}`;
+  const formattedSymbol = PAIR_MAP[currentPair] || 'FX:USDJPY';
+  
+  // Badge text display
+  const cleanBadgeText = currentPair.replace('/', '');
+  document.getElementById('pairDisplay').innerText = `6 ${cleanBadgeText}`;
 
-  const container = document.getElementById('chartArea');
-  const chart = LightweightCharts.createChart(container, {
-    width: container.clientWidth,
-    height: container.clientHeight,
-    layout: { backgroundColor: '#000000', textColor: '#888888' },
-    grid: { vertLines: { color: 'rgba(255, 255, 255, 0.04)' }, horzLines: { color: 'rgba(255, 255, 255, 0.04)' } },
-    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-    rightPriceScale: { borderColor: '#222222', visible: true },
-    timeScale: { 
-      borderColor: '#222222', 
-      timeVisible: true, 
-      secondsVisible: false,
-      tickMarkFormatter: (time) => {
-        const date = new Date((time + UTC6_OFFSET) * 1000);
-        const hours = String(date.getUTCHours()).padStart(2, '0');
-        const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-        return `${hours}:${minutes}`;
-      }
-    }
-  });
-
-  const candleSeries = chart.addCandlestickSeries({
-    upColor: '#00c853', downColor: '#d50000',
-    borderUpColor: '#00c853', borderDownColor: '#d50000',
-    wickUpColor: '#00c853', wickDownColor: '#d50000'
-  });
-
-  async function loadRealData() {
-    try {
-      const res = await fetch(`/api/candles?pair=${encodeURIComponent(currentPair)}`);
-      const result = await res.json();
-      
-      // Update Market Status Indicator
-      const statusBadge = document.getElementById('marketStatus');
-      if (result.status === "MARKET OPEN") {
-        statusBadge.innerText = "MARKET OPEN";
-        statusBadge.className = "status-badge status-open";
-      } else {
-        statusBadge.innerText = "MARKET CLOSED";
-        statusBadge.className = "status-badge status-closed";
-      }
-
-      if (result.data && result.data.length > 0) {
-        // Reverse newest-first API array into chronological order for chart
-        const formatted = result.data.slice().reverse().map(item => ({
-          time: item.timestamp,
-          open: item.open,
-          high: item.high,
-          low: item.low,
-          close: item.close
-        }));
-
-        candleSeries.setData(formatted);
-      }
-    } catch (e) {
-      console.error("API error", e);
-    }
+  function checkMarketOpen() {
+    const now = new Date();
+    const day = now.getUTCDay();
+    const hour = now.getUTCHours();
+    if (day === 6) return false;
+    if (day === 5 && hour >= 21) return false;
+    if (day === 0 && hour < 21) return false;
+    return true;
   }
 
-  loadRealData();
-  // Poll every 5 seconds to sync if market is open
-  setInterval(loadRealData, 5000);
+  const statusBadge = document.getElementById('marketStatus');
+  if (checkMarketOpen()) {
+    statusBadge.innerText = "MARKET OPEN";
+    statusBadge.className = "status-badge status-open";
+  } else {
+    statusBadge.innerText = "MARKET CLOSED";
+    statusBadge.className = "status-badge status-closed";
+  }
 
-  window.addEventListener('resize', () => {
-    chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
-  });
-
-  // Signal Overlay Control
-  window.showSignal = function(type) {
-    const box = document.getElementById('signalBox');
-    if (type === 'PUT') {
-      box.className = 'signal-box signal-put';
-      box.innerText = '▼ PUT';
-      box.style.display = 'block';
-    } else if (type === 'CALL') {
-      box.className = 'signal-box signal-call';
-      box.innerText = '▲ CALL';
-      box.style.display = 'block';
-    } else {
-      box.style.display = 'none';
+  new TradingView.widget({
+    "autosize": true,
+    "symbol": formattedSymbol,
+    "interval": "1",
+    "timezone": "Asia/Dhaka",
+    "theme": "dark",
+    "style": "1",
+    "locale": "en",
+    "toolbar_bg": "#000000",
+    "enable_publishing": false,
+    "hide_top_toolbar": true,
+    "hide_legend": true,
+    "save_image": false,
+    "container_id": "tv_chart_container",
+    "overrides": {
+      "paneProperties.background": "#000000",
+      "paneProperties.vertGridProperties.color": "rgba(255, 255, 255, 0.04)",
+      "paneProperties.horzGridProperties.color": "rgba(255, 255, 255, 0.04)",
+      "symbolWatermarkProperties.transparency": 100,
+      "scalesProperties.textColor": "#888888"
     }
-  };
+  });
 </script>
 </body>
 </html>
