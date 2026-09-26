@@ -8,24 +8,23 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Standard Forex Spot Symbols
-const FOREX_PAIR_MAP = {
-  'EUR/USD': 'EURUSD',
-  'USD/JPY': 'USDJPY',
-  'CAD/JPY': 'CADJPY',
-  'AUD/CAD': 'AUDCAD',
-  'GBP/USD': 'GBPUSD',
-  'EUR/JPY': 'EURJPY',
-  'AUD/JPY': 'AUDJPY',
-  'AUD/USD': 'AUDUSD',
-  'EUR/GBP': 'EURGBP',
-  'AUD/CHF': 'AUDCHF',
-  'AUDCHF':  'AUDCHF',
-  'EUR/CAD': 'EURCAD',
-  'GBP/CAD': 'GBPCAD'
+// Pair Symbol Mapping for OANDA / Forex Feed (TradingView Data Provider)
+const PAIR_MAP = {
+  'EUR/USD': 'EUR_USD', 'EURUSD': 'EUR_USD',
+  'USD/JPY': 'USD_JPY', 'USDJPY': 'USD_JPY',
+  'CAD/JPY': 'CAD_JPY', 'CADJPY': 'CAD_JPY',
+  'AUD/CAD': 'AUD_CAD', 'AUDCAD': 'AUD_CAD',
+  'GBP/USD': 'GBP_USD', 'GBPUSD': 'GBP_USD',
+  'EUR/JPY': 'EUR_JPY', 'EURJPY': 'EUR_JPY',
+  'AUD/JPY': 'AUD_JPY', 'AUDJPY': 'AUD_JPY',
+  'AUD/USD': 'AUD_USD', 'AUDUSD': 'AUD_USD',
+  'EUR/GBP': 'EUR_GBP', 'EURGBP': 'EUR_GBP',
+  'AUD/CHF': 'AUD_CHF', 'AUDCHF': 'AUD_CHF',
+  'EUR/CAD': 'EUR_CAD', 'EURCAD': 'EUR_CAD',
+  'GBP/CAD': 'GBP_CAD', 'GBPCAD': 'GBP_CAD'
 };
 
-// Convert Timestamp to Bangladesh UTC+6 String (HH:MM:SS)
+// Convert Timestamp to Bangladesh Time (UTC+6)
 function formatTimeUTC6(timestampMs) {
   const date = new Date(timestampMs + (6 * 60 * 60 * 1000));
   const hours = String(date.getUTCHours()).padStart(2, '0');
@@ -34,112 +33,84 @@ function formatTimeUTC6(timestampMs) {
   return `${hours}:${minutes}:${seconds}`;
 }
 
-// Global cache for store candles
-const candleStorage = {};
+// Check Market Hours (Forex closes Weekend)
+function isMarketOpen() {
+  const now = new Date();
+  const day = now.getUTCDay();
+  const hour = now.getUTCHours();
 
-// Generator function for standard TradingView-matched Forex Quotes
-function getRealForexBasePrice(pair) {
-  const basePrices = {
-    'USD/JPY': 158.450,
-    'EUR/USD': 1.08520,
-    'GBP/USD': 1.26810,
-    'AUD/USD': 0.65420,
-    'EUR/JPY': 171.950,
-    'CAD/JPY': 113.200,
-    'AUD/CAD': 0.89200,
-    'EUR/GBP': 0.85580,
-    'AUD/CHF': 0.58410,
-    'EUR/CAD': 1.47820,
-    'GBP/CAD': 1.72750
-  };
-  return basePrices[pair] || 100.00;
+  if (day === 6) return false;
+  if (day === 5 && hour >= 21) return false;
+  if (day === 0 && hour < 21) return false;
+  return true;
 }
 
-function initForexPair(pair) {
-  if (!candleStorage[pair]) {
-    candleStorage[pair] = [];
-    let base = getRealForexBasePrice(pair);
-    let now = Math.floor(Date.now() / 1000) - (60 * 60);
+// Fetch TradingView-Matched OANDA Forex Candles
+async function fetchTradingViewForexCandles(pairStr, count = 3000) {
+  const cleanPair = pairStr.toUpperCase().trim();
+  const symbol = PAIR_MAP[cleanPair] || 'EUR_USD';
 
-    for (let i = 0; i < 60; i++) {
-      let open = parseFloat(base.toFixed(3));
-      let step = (pair.includes('JPY') ? 0.04 : 0.0003);
-      let change = (Math.random() - 0.49) * step;
-      let close = parseFloat((open + change).toFixed(3));
-      let high = parseFloat((Math.max(open, close) + Math.random() * (step / 2)).toFixed(3));
-      let low = parseFloat((Math.min(open, close) - Math.random() * (step / 2)).toFixed(3));
+  // Direct Forex Provider Endpoint (TradingView Standard Provider)
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}=X?interval=1m&range=5d`;
 
-      candleStorage[pair].unshift({
-        close: close,
-        high: high,
-        low: low,
-        open: open,
-        pair: pair,
-        signal: close >= open ? "CALL" : "PUT",
-        time: formatTimeUTC6(now * 1000),
-        timestamp: now,
-        volume: 0
-      });
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+    const result = await response.json();
 
-      base = close;
-      now += 60;
+    const chartResult = result.chart.result[0];
+    const timestamps = chartResult.timestamp;
+    const quotes = chartResult.indicators.quote[0];
+
+    let candles = [];
+    for (let i = 0; i < timestamps.length; i++) {
+      if (quotes.open[i] && quotes.high[i] && quotes.low[i] && quotes.close[i]) {
+        const open = parseFloat(quotes.open[i].toFixed(5));
+        const high = parseFloat(quotes.high[i].toFixed(5));
+        const low = parseFloat(quotes.low[i].toFixed(5));
+        const close = parseFloat(quotes.close[i].toFixed(5));
+        const timestampMs = timestamps[i] * 1000;
+
+        candles.push({
+          close: close,
+          high: high,
+          low: low,
+          open: open,
+          pair: cleanPair,
+          signal: close >= open ? "CALL" : "PUT",
+          time: formatTimeUTC6(timestampMs),
+          timestamp: timestamps[i],
+          volume: quotes.volume[i] || 0
+        });
+      }
     }
+
+    // Limit to requested count and reverse (newest first for JSON)
+    return candles.slice(-count).reverse();
+  } catch (err) {
+    console.error("Forex Fetch Failed:", err.message);
+    return [];
   }
 }
 
-// Candle update engine
-setInterval(() => {
-  const nowMs = Date.now();
-  const currentSec = Math.floor(nowMs / 1000);
-  const minuteTs = currentSec - (currentSec % 60);
+// API Route (Image 2 Output)
+app.get('/api/candles', async (req, res) => {
+  const pair = req.query.pair || 'USD/JPY';
+  const candles = await fetchTradingViewForexCandles(pair, 3000);
+  const marketStatus = isMarketOpen() ? "MARKET OPEN" : "MARKET CLOSED";
 
-  Object.keys(FOREX_PAIR_MAP).forEach(pair => {
-    initForexPair(pair);
-    const list = candleStorage[pair];
-    const latest = list[0];
-
-    let step = (pair.includes('JPY') ? 0.015 : 0.0001);
-    let tick = (Math.random() - 0.49) * step;
-
-    if (latest && latest.timestamp === minuteTs) {
-      latest.close = parseFloat((latest.close + tick).toFixed(3));
-      latest.high = Math.max(latest.high, latest.close);
-      latest.low = Math.min(latest.low, latest.close);
-      latest.signal = latest.close >= latest.open ? "CALL" : "PUT";
-    } else {
-      let open = latest ? latest.close : getRealForexBasePrice(pair);
-      let close = parseFloat((open + tick).toFixed(3));
-      list.unshift({
-        close: close,
-        high: Math.max(open, close),
-        low: Math.min(open, close),
-        open: open,
-        pair: pair,
-        signal: close >= open ? "CALL" : "PUT",
-        time: formatTimeUTC6(nowMs),
-        timestamp: minuteTs,
-        volume: 0
-      });
-      if (list.length > 120) list.pop();
-    }
-  });
-}, 1000);
-
-// OPTION 1: JSON DATA API ROUTE (Image 2 Match)
-app.get('/api/candles', (req, res) => {
-  const pair = (req.query.pair || 'USD/JPY').toUpperCase().trim();
-  initForexPair(pair);
-  
   res.json({
-    data: candleStorage[pair] || []
+    status: marketStatus,
+    total_candles: candles.length,
+    data: candles
   });
 });
 
-// OPTION 2: VISUAL CHART ROUTE (Image 1 Match)
+// Canvas Visual Route (Image 1 Output)
 app.get('/chart', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'chart.html'));
 });
 
 app.listen(PORT, () => {
-  console.log(`Forex Trading Engine active on port ${PORT}`);
+  console.log(`TradingView Forex Engine running on port ${PORT}`);
 });
