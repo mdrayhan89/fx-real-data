@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ALPHA VANTAGE Forex Canvas</title>
+  <title>DARK SECRET Real Forex Engine</title>
   <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -11,7 +11,7 @@
       width: 100vw; height: 100vh;
       background-color: #000000;
       color: #e0e0e0;
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       overflow: hidden;
       display: flex; align-items: center; justify-content: center;
     }
@@ -25,11 +25,19 @@
       border: 1px solid rgba(179, 135, 90, 0.3); pointer-events: none; z-index: 5;
     }
     .header-logo {
-      position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+      position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
       z-index: 10; text-align: center; pointer-events: none;
     }
-    .crown-icon { color: #d4af37; font-size: 14px; letter-spacing: 3px; }
+    .crown-icon { color: #d4af37; font-size: 13px; letter-spacing: 3px; }
     .brand-title { color: #e5c158; font-size: 14px; font-weight: 700; letter-spacing: 3px; }
+    
+    .status-badge {
+      font-size: 10px; font-weight: bold; margin-top: 2px; padding: 2px 8px;
+      border-radius: 3px; display: inline-block;
+    }
+    .status-open { background: rgba(67, 160, 71, 0.2); color: #43a047; border: 1px solid #43a047; }
+    .status-closed { background: rgba(229, 57, 53, 0.2); color: #e53935; border: 1px solid #e53935; }
+
     .pair-badge {
       position: absolute; top: 12px; left: 15px; z-index: 10;
       background: rgba(20, 20, 20, 0.9); border: 1px solid #333;
@@ -38,9 +46,10 @@
     .signal-box {
       position: absolute; top: 12px; right: 15px; z-index: 10;
       padding: 5px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; color: #fff;
+      display: none;
     }
-    .signal-put { background: #e53935; }
-    .signal-call { background: #43a047; }
+    .signal-put { background: #e53935; box-shadow: 0 0 10px rgba(229, 57, 53, 0.5); }
+    .signal-call { background: #43a047; box-shadow: 0 0 10px rgba(67, 160, 71, 0.5); }
     #chartArea { width: 100%; height: 100%; }
   </style>
 </head>
@@ -49,20 +58,23 @@
   <div class="chart-frame">
     <div class="inner-border"></div>
     <div class="pair-badge" id="pairDisplay">6 USDJPY</div>
+    
     <div class="header-logo">
       <div class="crown-icon">♔♔♔</div>
-      <div class="brand-title">ALPHA VANTAGE</div>
+      <div class="brand-title">DARK SECRET</div>
+      <div class="status-badge status-closed" id="marketStatus">MARKET CLOSED</div>
     </div>
     
-    <div class="signal-box signal-call" id="signalBox">▲ CALL</div>
+    <div class="signal-box" id="signalBox"></div>
     <div id="chartArea"></div>
   </div>
 
 <script>
+  const UTC6_OFFSET = 6 * 3600;
+
   function getSelectedPair() {
     const urlParams = new URLSearchParams(window.location.search);
-    let pair = urlParams.get('pair') || 'USD/JPY';
-    return pair.toUpperCase();
+    return (urlParams.get('pair') || 'USD/JPY').toUpperCase();
   }
 
   const currentPair = getSelectedPair();
@@ -73,10 +85,20 @@
     width: container.clientWidth,
     height: container.clientHeight,
     layout: { backgroundColor: '#000000', textColor: '#888888' },
-    grid: { vertLines: { color: 'rgba(255, 255, 255, 0.03)' }, horzLines: { color: 'rgba(255, 255, 255, 0.03)' } },
+    grid: { vertLines: { color: 'rgba(255, 255, 255, 0.04)' }, horzLines: { color: 'rgba(255, 255, 255, 0.04)' } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
     rightPriceScale: { borderColor: '#222222', visible: true },
-    timeScale: { borderColor: '#222222', timeVisible: true, secondsVisible: false }
+    timeScale: { 
+      borderColor: '#222222', 
+      timeVisible: true, 
+      secondsVisible: false,
+      tickMarkFormatter: (time) => {
+        const date = new Date((time + UTC6_OFFSET) * 1000);
+        const hours = String(date.getUTCHours()).padStart(2, '0');
+        const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+        return `${hours}:${minutes}`;
+      }
+    }
   });
 
   const candleSeries = chart.addCandlestickSeries({
@@ -85,13 +107,23 @@
     wickUpColor: '#00c853', wickDownColor: '#d50000'
   });
 
-  async function loadDataFromApi() {
+  async function loadRealData() {
     try {
       const res = await fetch(`/api/candles?pair=${encodeURIComponent(currentPair)}`);
       const result = await res.json();
       
+      // Update Market Status Indicator
+      const statusBadge = document.getElementById('marketStatus');
+      if (result.status === "MARKET OPEN") {
+        statusBadge.innerText = "MARKET OPEN";
+        statusBadge.className = "status-badge status-open";
+      } else {
+        statusBadge.innerText = "MARKET CLOSED";
+        statusBadge.className = "status-badge status-closed";
+      }
+
       if (result.data && result.data.length > 0) {
-        // Reverse array to build historical series chronologically
+        // Reverse newest-first API array into chronological order for chart
         const formatted = result.data.slice().reverse().map(item => ({
           time: item.timestamp,
           open: item.open,
@@ -101,27 +133,35 @@
         }));
 
         candleSeries.setData(formatted);
-
-        // Update Signal Box based on latest candle
-        const latest = result.data[0];
-        const signalBox = document.getElementById('signalBox');
-        if (latest.signal === 'CALL') {
-          signalBox.className = 'signal-box signal-call';
-          signalBox.innerText = '▲ CALL';
-        } else {
-          signalBox.className = 'signal-box signal-put';
-          signalBox.innerText = '▼ PUT';
-        }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error("API error", e);
+    }
   }
 
-  loadDataFromApi();
-  setInterval(loadDataFromApi, 1000);
+  loadRealData();
+  // Poll every 5 seconds to sync if market is open
+  setInterval(loadRealData, 5000);
 
   window.addEventListener('resize', () => {
     chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
   });
+
+  // Signal Overlay Control
+  window.showSignal = function(type) {
+    const box = document.getElementById('signalBox');
+    if (type === 'PUT') {
+      box.className = 'signal-box signal-put';
+      box.innerText = '▼ PUT';
+      box.style.display = 'block';
+    } else if (type === 'CALL') {
+      box.className = 'signal-box signal-call';
+      box.innerText = '▲ CALL';
+      box.style.display = 'block';
+    } else {
+      box.style.display = 'none';
+    }
+  };
 </script>
 </body>
 </html>
