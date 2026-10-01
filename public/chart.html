@@ -29,7 +29,7 @@
       background-color: #000000;
       border: 2px solid #5a422d;
       border-radius: 4px;
-      padding: 1px;
+      padding: 0;
       overflow: hidden;
     }
 
@@ -84,10 +84,11 @@
       letter-spacing: 1px;
     }
 
-    /* Container Technique to Hide Bottom TradingView Logo */
+    /* Double-Side Crop Box to Hide TV Logo Completely */
     .widget-crop-box {
-      width: 100%;
-      height: calc(100% + 36px); /* Pushes bottom logo outside boundary */
+      width: calc(100% + 55px);
+      height: calc(100% + 45px);
+      margin-left: -50px; /* Pushes bottom-left logo outside the view */
       margin-top: -2px;
       position: relative;
       overflow: hidden;
