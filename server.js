@@ -8,20 +8,19 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Standard Forex Pair Mapping
 const PAIR_MAP = {
-  'EUR/USD': 'EUR/USD', 'EURUSD': 'EUR/USD',
-  'USD/JPY': 'USD/JPY', 'USDJPY': 'USD/JPY',
-  'CAD/JPY': 'CAD/JPY', 'CADJPY': 'CAD/JPY',
-  'AUD/CAD': 'AUD/CAD', 'AUDCAD': 'AUD/CAD',
-  'GBP/USD': 'GBP/USD', 'GBPUSD': 'GBP/USD',
-  'EUR/JPY': 'EUR/JPY', 'EURJPY': 'EUR/JPY',
-  'AUD/JPY': 'AUD/JPY', 'AUDJPY': 'AUD/JPY',
-  'AUD/USD': 'AUD/USD', 'AUDUSD': 'AUD/USD',
-  'EUR/GBP': 'EUR/GBP', 'EURGBP': 'EUR/GBP',
-  'AUD/CHF': 'AUD/CHF', 'AUDCHF': 'AUD/CHF',
-  'EUR/CAD': 'EUR/CAD', 'EURCAD': 'EUR/CAD',
-  'GBP/CAD': 'GBP/CAD', 'GBPCAD': 'GBP/CAD'
+  'EUR/USD': 'FX_IDC:EURUSD', 'EURUSD': 'FX_IDC:EURUSD',
+  'USD/JPY': 'FX_IDC:USDJPY', 'USDJPY': 'FX_IDC:USDJPY',
+  'CAD/JPY': 'FX_IDC:CADJPY', 'CADJPY': 'FX_IDC:CADJPY',
+  'AUD/CAD': 'FX_IDC:AUDCAD', 'AUDCAD': 'FX_IDC:AUDCAD',
+  'GBP/USD': 'FX_IDC:GBPUSD', 'GBPUSD': 'FX_IDC:GBPUSD',
+  'EUR/JPY': 'FX_IDC:EURJPY', 'EURJPY': 'FX_IDC:EURJPY',
+  'AUD/JPY': 'FX_IDC:AUDJPY', 'AUDJPY': 'FX_IDC:AUDJPY',
+  'AUD/USD': 'FX_IDC:AUDUSD', 'AUDUSD': 'FX_IDC:AUDUSD',
+  'EUR/GBP': 'FX_IDC:EURGBP', 'EURGBP': 'FX_IDC:EURGBP',
+  'AUD/CHF': 'FX_IDC:AUDCHF', 'AUDCHF': 'FX_IDC:AUDCHF',
+  'EUR/CAD': 'FX_IDC:EURCAD', 'EURCAD': 'FX_IDC:EURCAD',
+  'GBP/CAD': 'FX_IDC:GBPCAD', 'GBPCAD': 'FX_IDC:GBPCAD'
 };
 
 function formatTimeUTC6(timestampMs) {
@@ -42,27 +41,35 @@ function isMarketOpen() {
   return true;
 }
 
-// Guaranteed Data Fetcher via Multi-Endpoint Fallback
-async function fetchRealForexCandles(pairStr, limit = 3000) {
+async function fetchTradingViewDirectCandles(pairStr) {
   const cleanPair = pairStr.toUpperCase().trim();
-  const pairFormatted = PAIR_MAP[cleanPair] || 'USD/JPY';
-  const symbolNoSlash = pairFormatted.replace('/', '');
+  const tvSymbol = PAIR_MAP[cleanPair] || 'FX_IDC:USDJPY';
+  
+  const now = Math.floor(Date.now() / 1000);
+  const from = now - (500 * 60);
+  const url = `https://udf.tradingview.com/history?symbol=${tvSymbol}&resolution=1&from=${from}&to=${now}`;
 
-  // Provider 1: Public Financial Forex Engine
   try {
-    const url1 = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(pairFormatted)}&interval=1min&outputsize=500&apikey=demo`;
-    const res1 = await fetch(url1);
-    const data1 = await res1.json();
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://www.tradingview.com'
+      }
+    });
 
-    if (data1 && data1.values && data1.values.length > 0) {
-      let candles = data1.values.map(item => {
-        const open = parseFloat(item.open);
-        const high = parseFloat(item.high);
-        const low = parseFloat(item.low);
-        const close = parseFloat(item.close);
-        const ts = Math.floor(new Date(item.datetime).getTime() / 1000);
+    if (!response.ok) throw new Error("TV UDF Fetch Error");
+    const json = await response.json();
 
-        return {
+    if (json.s === "ok" && json.t && json.t.length > 0) {
+      let candles = [];
+      for (let i = 0; i < json.t.length; i++) {
+        const open = parseFloat(json.o[i]);
+        const high = parseFloat(json.h[i]);
+        const low = parseFloat(json.l[i]);
+        const close = parseFloat(json.c[i]);
+        const ts = json.t[i];
+
+        candles.push({
           close: close,
           high: high,
           low: low,
@@ -71,54 +78,21 @@ async function fetchRealForexCandles(pairStr, limit = 3000) {
           signal: close >= open ? "CALL" : "PUT",
           time: formatTimeUTC6(ts * 1000),
           timestamp: ts,
-          volume: 0
-        };
-      });
-      return candles;
+          volume: json.v ? json.v[i] : 0
+        });
+      }
+      return candles.reverse();
     }
-  } catch (e) {
-    console.log("Provider 1 failed, attempting Provider 2...");
-  }
-
-  // Provider 2: Alternative Live Market Data Stream
-  try {
-    const url2 = `https://financialmodelingprep.com/api/v3/historical-chart/1min/${symbolNoSlash}?apikey=demo`;
-    const res2 = await fetch(url2);
-    const data2 = await res2.json();
-
-    if (Array.isArray(data2) && data2.length > 0) {
-      let candles = data2.map(item => {
-        const open = parseFloat(item.open);
-        const high = parseFloat(item.high);
-        const low = parseFloat(item.low);
-        const close = parseFloat(item.close);
-        const ts = Math.floor(new Date(item.date).getTime() / 1000);
-
-        return {
-          close: close,
-          high: high,
-          low: low,
-          open: open,
-          pair: cleanPair,
-          signal: close >= open ? "CALL" : "PUT",
-          time: formatTimeUTC6(ts * 1000),
-          timestamp: ts,
-          volume: item.volume || 0
-        };
-      });
-      return candles;
-    }
-  } catch (e) {
-    console.log("Provider 2 failed");
+  } catch (err) {
+    console.error("Direct TV UDF error, fallback engaged");
   }
 
   return [];
 }
 
-// Option 1: Live JSON API Route
 app.get('/api/candles', async (req, res) => {
   const pair = req.query.pair || 'USD/JPY';
-  const candles = await fetchRealForexCandles(pair, 3000);
+  const candles = await fetchTradingViewDirectCandles(pair);
   const status = isMarketOpen() ? "MARKET OPEN" : "MARKET CLOSED";
 
   res.json({
@@ -128,11 +102,10 @@ app.get('/api/candles', async (req, res) => {
   });
 });
 
-// Option 2: Visual Gold Frame Chart Route
 app.get('/chart', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'chart.html'));
 });
 
 app.listen(PORT, () => {
-  console.log(`DARK SECRET Server running on port ${PORT}`);
+  console.log(`DARK SECRET TradingView-Synced Server running on port ${PORT}`);
 });
