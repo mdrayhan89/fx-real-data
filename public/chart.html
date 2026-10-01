@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DARK SECRET Real Forex Canvas Engine</title>
+  <title>DARK SECRET Real Forex Engine</title>
   <script src="https://unpkg.com/lightweight-charts@3.8.0/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -56,7 +56,7 @@
 
   <div class="chart-frame">
     <div class="inner-border"></div>
-    <div class="pair-badge" id="pairDisplay">6 EURUSD</div>
+    <div class="pair-badge" id="pairDisplay">6 USDJPY</div>
     
     <div class="header-logo">
       <div class="crown-icon">♔♔♔</div>
@@ -73,7 +73,7 @@
 
   function getSelectedPair() {
     const urlParams = new URLSearchParams(window.location.search);
-    return (urlParams.get('pair') || 'EUR/USD').toUpperCase();
+    return (urlParams.get('pair') || 'USD/JPY').toUpperCase();
   }
 
   const currentPair = getSelectedPair();
@@ -141,11 +141,13 @@
           signalBox.innerText = '▼ PUT';
         }
       }
-    } catch (e) {}
+    } catch (e) {
+      console.error("Data loading error", e);
+    }
   }
 
   loadData();
-  setInterval(loadData, 3000);
+  setInterval(loadData, 5000);
 
   window.addEventListener('resize', () => {
     chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
