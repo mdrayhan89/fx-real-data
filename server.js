@@ -9,18 +9,18 @@ app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PAIR_MAP = {
-  'EUR/USD': 'FX_IDC:EURUSD', 'EURUSD': 'FX_IDC:EURUSD',
-  'USD/JPY': 'FX_IDC:USDJPY', 'USDJPY': 'FX_IDC:USDJPY',
-  'CAD/JPY': 'FX_IDC:CADJPY', 'CADJPY': 'FX_IDC:CADJPY',
-  'AUD/CAD': 'FX_IDC:AUDCAD', 'AUDCAD': 'FX_IDC:AUDCAD',
-  'GBP/USD': 'FX_IDC:GBPUSD', 'GBPUSD': 'FX_IDC:GBPUSD',
-  'EUR/JPY': 'FX_IDC:EURJPY', 'EURJPY': 'FX_IDC:EURJPY',
-  'AUD/JPY': 'FX_IDC:AUDJPY', 'AUDJPY': 'FX_IDC:AUDJPY',
-  'AUD/USD': 'FX_IDC:AUDUSD', 'AUDUSD': 'FX_IDC:AUDUSD',
-  'EUR/GBP': 'FX_IDC:EURGBP', 'EURGBP': 'FX_IDC:EURGBP',
-  'AUD/CHF': 'FX_IDC:AUDCHF', 'AUDCHF': 'FX_IDC:AUDCHF',
-  'EUR/CAD': 'FX_IDC:EURCAD', 'EURCAD': 'FX_IDC:EURCAD',
-  'GBP/CAD': 'FX_IDC:GBPCAD', 'GBPCAD': 'FX_IDC:GBPCAD'
+  'EUR/USD': 'FX:EURUSD', 'EURUSD': 'FX:EURUSD',
+  'USD/JPY': 'FX:USDJPY', 'USDJPY': 'FX:USDJPY',
+  'CAD/JPY': 'FX:CADJPY', 'CADJPY': 'FX:CADJPY',
+  'AUD/CAD': 'FX:AUDCAD', 'AUDCAD': 'FX:AUDCAD',
+  'GBP/USD': 'FX:GBPUSD', 'GBPUSD': 'FX:GBPUSD',
+  'EUR/JPY': 'FX:EURJPY', 'EURJPY': 'FX:EURJPY',
+  'AUD/JPY': 'FX:AUDJPY', 'AUDJPY': 'FX:AUDJPY',
+  'AUD/USD': 'FX:AUDUSD', 'AUDUSD': 'FX:AUDUSD',
+  'EUR/GBP': 'FX:EURGBP', 'EURGBP': 'FX:EURGBP',
+  'AUD/CHF': 'FX:AUDCHF', 'AUDCHF': 'FX:AUDCHF',
+  'EUR/CAD': 'FX:EURCAD', 'EURCAD': 'FX:EURCAD',
+  'GBP/CAD': 'FX:GBPCAD', 'GBPCAD': 'FX:GBPCAD'
 };
 
 function formatTimeUTC6(timestampMs) {
@@ -41,58 +41,61 @@ function isMarketOpen() {
   return true;
 }
 
-async function fetchTradingViewDirectCandles(pairStr) {
+// Bot & Chart-er jonno Direct Sync Engine
+async function fetchTradingViewBotCandles(pairStr) {
   const cleanPair = pairStr.toUpperCase().trim();
-  const tvSymbol = PAIR_MAP[cleanPair] || 'FX_IDC:USDJPY';
+  const symbol = PAIR_MAP[cleanPair] || 'FX:USDJPY';
   
   const now = Math.floor(Date.now() / 1000);
   const from = now - (500 * 60);
-  const url = `https://udf.tradingview.com/history?symbol=${tvSymbol}&resolution=1&from=${from}&to=${now}`;
+
+  // TradingView Direct WebSocket Gateway Bypass
+  const tvUrl = `https://benchmarks.tradingview.com/v1/data?symbol=${encodeURIComponent(symbol)}&resolution=1&from=${from}&to=${now}`;
 
   try {
-    const response = await fetch(url, {
+    const response = await fetch(tvUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://www.tradingview.com'
+        'Origin': 'https://www.tradingview.com',
+        'Referer': 'https://www.tradingview.com/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       }
     });
 
-    if (!response.ok) throw new Error("TV UDF Fetch Error");
-    const json = await response.json();
+    if (response.ok) {
+      const json = await response.json();
+      if (json && json.t && json.t.length > 0) {
+        let candles = [];
+        for (let i = 0; i < json.t.length; i++) {
+          const open = parseFloat(json.o[i]);
+          const high = parseFloat(json.h[i]);
+          const low = parseFloat(json.l[i]);
+          const close = parseFloat(json.c[i]);
+          const ts = json.t[i];
 
-    if (json.s === "ok" && json.t && json.t.length > 0) {
-      let candles = [];
-      for (let i = 0; i < json.t.length; i++) {
-        const open = parseFloat(json.o[i]);
-        const high = parseFloat(json.h[i]);
-        const low = parseFloat(json.l[i]);
-        const close = parseFloat(json.c[i]);
-        const ts = json.t[i];
-
-        candles.push({
-          close: close,
-          high: high,
-          low: low,
-          open: open,
-          pair: cleanPair,
-          signal: close >= open ? "CALL" : "PUT",
-          time: formatTimeUTC6(ts * 1000),
-          timestamp: ts,
-          volume: json.v ? json.v[i] : 0
-        });
+          candles.push({
+            close: close,
+            high: high,
+            low: low,
+            open: open,
+            pair: cleanPair,
+            signal: close >= open ? "CALL" : "PUT",
+            time: formatTimeUTC6(ts * 1000),
+            timestamp: ts,
+            volume: json.v ? json.v[i] : 0
+          });
+        }
+        return candles.reverse();
       }
-      return candles.reverse();
     }
-  } catch (err) {
-    console.error("Direct TV UDF error, fallback engaged");
-  }
+  } catch (err) {}
 
   return [];
 }
 
+// Bot Execution Endpoint
 app.get('/api/candles', async (req, res) => {
   const pair = req.query.pair || 'USD/JPY';
-  const candles = await fetchTradingViewDirectCandles(pair);
+  const candles = await fetchTradingViewBotCandles(pair);
   const status = isMarketOpen() ? "MARKET OPEN" : "MARKET CLOSED";
 
   res.json({
@@ -107,5 +110,5 @@ app.get('/chart', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`DARK SECRET TradingView-Synced Server running on port ${PORT}`);
+  console.log(`DARK SECRET Trading Engine running on port ${PORT}`);
 });
